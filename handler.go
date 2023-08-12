@@ -40,6 +40,18 @@ func NewUnaryHandler[Req, Res any](
 	unary func(context.Context, *Request[Req]) (*Response[Res], error),
 	options ...HandlerOption,
 ) *Handler {
+	return NewUnaryHandlerWithRequestFactory[Req, Res](procedure, unary, defaultReqFactory[Req], options...)
+}
+
+// NewUnaryHandlerWithRequestFactory constructs a [Handler] for a request-response procedure using a factory
+// function to create the request message. This is useful in sceanrios there the zero value of the request message
+// is not usable for unmarshaling, for example when using dynamic messages.
+func NewUnaryHandlerWithRequestFactory[Req, Res any](
+	procedure string,
+	unary func(context.Context, *Request[Req]) (*Response[Res], error),
+	factory func() *Req,
+	options ...HandlerOption,
+) *Handler {
 	// Wrap the strongly-typed implementation so we can apply interceptors.
 	untyped := UnaryFunc(func(ctx context.Context, request AnyRequest) (AnyResponse, error) {
 		if err := ctx.Err(); err != nil {
@@ -63,8 +75,8 @@ func NewUnaryHandler[Req, Res any](
 	}
 	// Given a stream, how should we call the unary function?
 	implementation := func(ctx context.Context, conn StreamingHandlerConn) error {
-		var msg Req
-		if err := conn.Receive(&msg); err != nil {
+		msg := factory()
+		if err := conn.Receive(msg); err != nil {
 			return err
 		}
 		method := http.MethodPost
@@ -72,7 +84,7 @@ func NewUnaryHandler[Req, Res any](
 			method = hasRequestMethod.getHTTPMethod()
 		}
 		request := &Request[Req]{
-			Msg:    &msg,
+			Msg:    msg,
 			spec:   conn.Spec(),
 			peer:   conn.Peer(),
 			header: conn.RequestHeader(),
@@ -332,4 +344,9 @@ func newStreamHandler(
 		allowMethod:      sortedAllowMethodValue(protocolHandlers),
 		acceptPost:       sortedAcceptPostValue(protocolHandlers),
 	}
+}
+
+// defaultReqFactory creates a new zero value of the request type.
+func defaultReqFactory[Req any]() *Req {
+	return new(Req)
 }
