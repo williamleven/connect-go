@@ -27,7 +27,11 @@ import (
 type ClientStream[Req any] struct {
 	conn StreamingHandlerConn
 	msg  *Req
-	err  error
+	// factory is used to construct a new message when Receive is called. If
+	// factory is nil, Receive will construct a new message using the zero
+	// value to preserve backwards compatibility of the ClientStream struct
+	factory func() *Req
+	err     error
 }
 
 // Spec returns the specification for the RPC.
@@ -54,7 +58,11 @@ func (c *ClientStream[Req]) Receive() bool {
 	if c.err != nil {
 		return false
 	}
-	c.msg = new(Req)
+	if c.factory != nil {
+		c.msg = c.factory()
+	} else {
+		c.msg = new(Req)
+	}
 	c.err = c.conn.Receive(c.msg)
 	return c.err == nil
 }
@@ -62,7 +70,11 @@ func (c *ClientStream[Req]) Receive() bool {
 // Msg returns the most recent message unmarshaled by a call to Receive.
 func (c *ClientStream[Req]) Msg() *Req {
 	if c.msg == nil {
-		c.msg = new(Req)
+		if c.factory != nil {
+			c.msg = c.factory()
+		} else {
+			c.msg = new(Req)
+		}
 	}
 	return c.msg
 }
@@ -128,6 +140,10 @@ func (s *ServerStream[Res]) Conn() StreamingHandlerConn {
 // an exported constructor.
 type BidiStream[Req, Res any] struct {
 	conn StreamingHandlerConn
+	// factory is used to construct a new message when Receive is called. If
+	// factory is nil, Receive will construct a new message using the zero
+	// value to preserve backwards compatibility of the ClientStream struct
+	factory func() *Req
 }
 
 // Spec returns the specification for the RPC.
@@ -148,11 +164,16 @@ func (b *BidiStream[Req, Res]) RequestHeader() http.Header {
 // Receive a message. When the client is done sending messages, Receive will
 // return an error that wraps [io.EOF].
 func (b *BidiStream[Req, Res]) Receive() (*Req, error) {
-	var req Req
-	if err := b.conn.Receive(&req); err != nil {
+	var req *Req
+	if b.factory != nil {
+		req = b.factory()
+	} else {
+		req = new(Req)
+	}
+	if err := b.conn.Receive(req); err != nil {
 		return nil, err
 	}
-	return &req, nil
+	return req, nil
 }
 
 // ResponseHeader returns the response headers. Headers are sent with the first

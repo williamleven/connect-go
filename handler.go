@@ -115,11 +115,23 @@ func NewClientStreamHandler[Req, Res any](
 	implementation func(context.Context, *ClientStream[Req]) (*Response[Res], error),
 	options ...HandlerOption,
 ) *Handler {
+	return NewClientStreamHandlerWithRequestFactory[Req, Res](procedure, implementation, defaultReqFactory[Req], options...)
+}
+
+// NewClientStreamHandler constructs a [Handler] for a client streaming procedure using a factory
+// function to create the request message. This is useful in sceanrios there the zero value of the request message
+// is not usable for unmarshaling, for example when using dynamic messages.
+func NewClientStreamHandlerWithRequestFactory[Req, Res any](
+	procedure string,
+	implementation func(context.Context, *ClientStream[Req]) (*Response[Res], error),
+	factory func() *Req,
+	options ...HandlerOption,
+) *Handler {
 	return newStreamHandler(
 		procedure,
 		StreamTypeClient,
 		func(ctx context.Context, conn StreamingHandlerConn) error {
-			stream := &ClientStream[Req]{conn: conn}
+			stream := &ClientStream[Req]{conn: conn, factory: factory}
 			res, err := implementation(ctx, stream)
 			if err != nil {
 				return err
@@ -143,18 +155,30 @@ func NewServerStreamHandler[Req, Res any](
 	implementation func(context.Context, *Request[Req], *ServerStream[Res]) error,
 	options ...HandlerOption,
 ) *Handler {
+	return NewServerStreamHandlerWithRequestFactory[Req, Res](procedure, implementation, defaultReqFactory[Req], options...)
+}
+
+// NewServerStreamHandler constructs a [Handler] for a server streaming procedure using a factory
+// function to create the request message. This is useful in sceanrios there the zero value of the request message
+// is not usable for unmarshaling, for example when using dynamic messages.
+func NewServerStreamHandlerWithRequestFactory[Req, Res any](
+	procedure string,
+	implementation func(context.Context, *Request[Req], *ServerStream[Res]) error,
+	factory func() *Req,
+	options ...HandlerOption,
+) *Handler {
 	return newStreamHandler(
 		procedure,
 		StreamTypeServer,
 		func(ctx context.Context, conn StreamingHandlerConn) error {
-			var msg Req
-			if err := conn.Receive(&msg); err != nil {
+			msg := factory()
+			if err := conn.Receive(msg); err != nil {
 				return err
 			}
 			return implementation(
 				ctx,
 				&Request[Req]{
-					Msg:    &msg,
+					Msg:    msg,
 					spec:   conn.Spec(),
 					peer:   conn.Peer(),
 					header: conn.RequestHeader(),
@@ -173,13 +197,25 @@ func NewBidiStreamHandler[Req, Res any](
 	implementation func(context.Context, *BidiStream[Req, Res]) error,
 	options ...HandlerOption,
 ) *Handler {
+	return NewBidiStreamHandlerWithRequestFactory[Req, Res](procedure, implementation, defaultReqFactory[Req], options...)
+}
+
+// NewBidiStreamHandler constructs a [Handler] for a bidirectional streaming procedure using a factory
+// function to create the request message. This is useful in sceanrios there the zero value of the request message
+// is not usable for unmarshaling, for example when using dynamic messages.
+func NewBidiStreamHandlerWithRequestFactory[Req, Res any](
+	procedure string,
+	implementation func(context.Context, *BidiStream[Req, Res]) error,
+	factory func() *Req,
+	options ...HandlerOption,
+) *Handler {
 	return newStreamHandler(
 		procedure,
 		StreamTypeBidi,
 		func(ctx context.Context, conn StreamingHandlerConn) error {
 			return implementation(
 				ctx,
-				&BidiStream[Req, Res]{conn: conn},
+				&BidiStream[Req, Res]{conn: conn, factory: factory},
 			)
 		},
 		options...,
